@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="48" height="48" role="img" aria-label="Lexiko">
+  <defs>
+    <linearGradient id="lexiko-tile" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#4B7BFF" />
+      <stop offset="1" stop-color="#1E4FE0" />
+    </linearGradient>
+  </defs>
+  <rect width="48" height="48" rx="12" fill="url(#lexiko-tile)" />
+  <path
+    d="M12.5 36.5 L24 12.5 L35.5 36.5"
+    fill="none"
+    stroke="#FFFFFF"
+    stroke-width="5.25"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
+  <path
+    d="M17.6 28.4 H30.4"
+    fill="none"
+    stroke="#FBBF24"
+    stroke-width="4.75"
+    stroke-linecap="round"
+  />
+</svg>
