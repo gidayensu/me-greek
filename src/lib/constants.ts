@@ -75,6 +75,8 @@ export const STORAGE_KEY = {
   USER_DATA: "lexiko:user-data:v1",
   SYNC_META: "lexiko:sync-meta:v1",
   THEME: "lexiko:theme:v1",
+  /** Ciphertext only — the decryption key lives in IndexedDB, not here. */
+  GOOGLE_TOKEN: "lexiko:google-token:v1",
 } as const
 
 /** The single file Lexiko keeps in the user's Drive appDataFolder. */

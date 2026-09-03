@@ -36,6 +36,11 @@ import {
 } from "@/lib/google/auth"
 import type { GoogleProfile, GoogleToken } from "@/lib/google/auth"
 import { messageFor, synchronize } from "@/lib/google/sync"
+import {
+  clearPersistedToken,
+  persistToken,
+  restoreToken,
+} from "@/lib/google/secure-token-store"
 
 type AppState = {
   /** False until local storage has been read; the UI shows a quiet skeleton. */
@@ -84,7 +89,12 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
   const [profile, setProfile] = useState<GoogleProfile | null>(null)
   const [online, setOnline] = useState(true)
 
-  /** In memory only — a token is never written to storage. */
+  /**
+   * The live token used for requests. It is also persisted, encrypted, to
+   * localStorage/IndexedDB (see secure-token-store) so a reload does not
+   * always need a network round trip — but this in-memory copy is the one
+   * ever used to make a request.
+   */
   const tokenRef = useRef<GoogleToken | null>(null)
   /** Set when a prior grant lacked Drive, so the next sign-in forces consent. */
   const needsConsentRef = useRef(false)
@@ -149,6 +159,7 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
     if (!token) return
     if (isExpired(token)) {
       tokenRef.current = null
+      void clearPersistedToken()
       setSyncStatus(SYNC_STATUS.FAILED)
       setSyncMessage(messageFor(SYNC_ERROR.AUTH_EXPIRED))
       return
@@ -172,6 +183,7 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
         outcome.kind === SYNC_ERROR.SCOPE_MISSING
       ) {
         tokenRef.current = null
+        void clearPersistedToken()
         // The Drive permission was refused, so the next sign-in must show the
         // consent screen again rather than silently reissuing the same grant.
         needsConsentRef.current = outcome.kind === SYNC_ERROR.SCOPE_MISSING
@@ -192,6 +204,8 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
   const applyToken = useCallback(
     async (token: GoogleToken) => {
       tokenRef.current = token
+      // Best-effort; a failure here must never block using the token we already have.
+      void persistToken(token)
       // Scopes are not secret and are the single most useful thing to see when
       // sign-in succeeds but every Drive call is refused.
       console.info("[lexiko] Google granted scopes:", token.grantedScopes)
@@ -236,17 +250,30 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
     }
   }, [applyToken, googleConfigured])
 
-  // Try to pick a previous Google session back up without prompting.
+  // Try to pick a previous Google session back up without prompting: first
+  // from the encrypted local copy (no network needed, works within the
+  // token's own ~1hr lifetime), then by asking Google silently.
   useEffect(() => {
     if (!hydrated || !googleConfigured) return
     let cancelled = false
-    requestAccessToken({ silent: true })
-      .then((token) => {
-        if (!cancelled) return applyToken(token)
-      })
-      .catch(() => {
+
+    async function resume() {
+      const persisted = await restoreToken()
+      if (cancelled) return
+      if (persisted) {
+        await applyToken(persisted)
+        return
+      }
+      try {
+        const token = await requestAccessToken({ silent: true })
+        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- `cancelled` is flipped by this effect's cleanup, which TS cannot see across the `await` above
+        if (!cancelled) await applyToken(token)
+      } catch {
         // Expected when there is no active Google session — stay local-only.
-      })
+      }
+    }
+
+    void resume()
     return () => {
       cancelled = true
     }
@@ -255,6 +282,7 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
   const signOut = useCallback(async ({ forgetLocalData = false } = {}) => {
     const token = tokenRef.current
     tokenRef.current = null
+    await clearPersistedToken()
     if (token) await revokeAccess(token).catch(() => undefined)
     setProfile(null)
     setSyncStatus(SYNC_STATUS.SIGNED_OUT)
