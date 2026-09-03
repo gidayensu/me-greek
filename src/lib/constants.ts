@@ -6,6 +6,10 @@
 export const QUIZ_MODE = {
   MULTIPLE_CHOICE: "multiple-choice",
   FLASHCARDS: "flashcards",
+  WORD_BUILDER: "word-builder",
+  MEMORY_GRID: "memory-grid",
+  LISTENING_QUEST: "listening-quest",
+  PASSAGE_HUNT: "passage-hunt",
 } as const
 export type QuizMode = (typeof QUIZ_MODE)[keyof typeof QUIZ_MODE]
 
@@ -99,6 +103,18 @@ export const DEFAULT_QUESTION_COUNT = 20
 export const MIN_QUESTION_COUNT = 5
 export const MAX_QUESTION_COUNT = 100
 export const MULTIPLE_CHOICE_OPTIONS = 4
+
+/** Spare letters mixed in alongside the real ones in Word Builder. */
+export const WORD_BUILDER_EXTRA_LETTERS = 6
+/** Below this, spelling the word out is not an exercise (ὁ, ἐν, ἤ …). */
+export const WORD_BUILDER_MIN_LETTERS = 3
+/** A Memory Grid board is pairCount × 2 cards, so keep it scannable. */
+export const MEMORY_GRID_MIN_PAIRS = 2
+export const MEMORY_GRID_MAX_PAIRS = 8
+/** Playback rates offered by Listening Quest. Order is the display order. */
+export const LISTENING_REPLAY_SPEEDS = [0.75, 1, 1.25] as const
+/** Greek voices are rare; this is the closest widely-shipped locale. */
+export const SPEECH_LANGUAGE = "el-GR"
 
 /**
  * Mastery rule: a word counts as mastered once it has been answered correctly

@@ -3,9 +3,11 @@ import {
   LEARNING_STATUS,
   MULTIPLE_CHOICE_OPTIONS,
   QUESTION_ORDER,
+  QUIZ_MODE,
   SELECTION_MODE,
+  WORD_BUILDER_MIN_LETTERS,
 } from "@/lib/constants"
-import type { Direction } from "@/lib/constants"
+import type { Direction, QuizMode } from "@/lib/constants"
 import type { Word } from "@/lib/vocabulary/types"
 import {
   WORDS,
@@ -16,6 +18,7 @@ import {
 } from "@/lib/vocabulary/vocabulary"
 import type { PracticeConfig, SelectionSpec, UserData } from "./types"
 import { difficultWords, progressFor, statusOf } from "./progress"
+import { hasUsablePassage, splitGreekLetters } from "./games"
 
 /** Deterministic PRNG so a session can be rebuilt from a seed if needed. */
 export function makeRandom(seed: number): () => number {
@@ -57,6 +60,38 @@ export function resolveSelection(
           .map((progress) => progress.wordId)
       )
   }
+}
+
+/**
+ * Some games need more than a headword: Passage Hunt needs a verse the word
+ * can actually be found in. Filtering here means the practice wizard's live
+ * preview shows the true pool size before a session ever starts.
+ */
+export function supportsMode(word: Word, mode: QuizMode): boolean {
+  if (mode === QUIZ_MODE.PASSAGE_HUNT) return hasUsablePassage(word)
+  if (mode === QUIZ_MODE.WORD_BUILDER) {
+    return splitGreekLetters(word.greek).length >= WORD_BUILDER_MIN_LETTERS
+  }
+  return true
+}
+
+/**
+ * Some games fix the direction their questions are built in, whatever the
+ * learner chose. Listening Quest plays Greek audio, so its options have to be
+ * Greek spellings; Word Builder shows an English clue and is answered in
+ * Greek. Asking those the other way round makes them unanswerable.
+ */
+export function questionDirectionFor(
+  mode: QuizMode,
+  configured: Direction
+): Direction {
+  if (
+    mode === QUIZ_MODE.LISTENING_QUEST ||
+    mode === QUIZ_MODE.WORD_BUILDER
+  ) {
+    return DIRECTION.ENGLISH_TO_GREEK
+  }
+  return configured
 }
 
 export function applyStatusFilter(
@@ -187,7 +222,7 @@ export function buildSession(
     resolveSelection(config.selection, data),
     data,
     config.statusFilter
-  )
+  ).filter((word) => supportsMode(word, config.mode))
 
   let ordered: Word[]
   if (config.questionOrder === QUESTION_ORDER.RANDOM) {
@@ -201,7 +236,11 @@ export function buildSession(
   const words = ordered.slice(0, Math.max(0, config.questionCount))
   return {
     words,
-    questions: buildQuestions(words, config.direction, random),
+    questions: buildQuestions(
+      words,
+      questionDirectionFor(config.mode, config.direction),
+      random
+    ),
     poolSize: pool.length,
   }
 }

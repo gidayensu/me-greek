@@ -14,10 +14,16 @@ import { Card, StatCard } from "@/components/layout/page-parts"
 import { GreekText } from "@/components/vocabulary/word-bits"
 import { MultipleChoiceCard } from "@/components/session/multiple-choice"
 import { FlashcardCard } from "@/components/session/flashcard"
+import { WordBuilderCard } from "@/components/session/word-builder"
+import { ListeningQuestCard } from "@/components/session/listening-quest"
+import { PassageHuntCard } from "@/components/session/passage-hunt"
+import { MemoryGridGame } from "@/components/session/memory-grid"
+import type { MemoryOutcome } from "@/components/session/memory-grid"
 import {
   DIRECTION,
   LEARNING_STATUS,
   MAX_QUESTION_COUNT,
+  MEMORY_GRID_MIN_PAIRS,
   QUESTION_ORDER,
   QUIZ_MODE,
   SELECTION_MODE,
@@ -30,7 +36,8 @@ import type {
   StatusFilter,
   WordProgress,
 } from "@/lib/learning/types"
-import { buildSession } from "@/lib/learning/session"
+import { buildSession, makeRandom } from "@/lib/learning/session"
+import { buildMemoryBoard, buildWordBuilderPuzzle } from "@/lib/learning/games"
 import { progressFor, recordAnswer } from "@/lib/learning/progress"
 import { getSet, getWord } from "@/lib/vocabulary/vocabulary"
 import { useAppStore } from "@/lib/state/app-store"
@@ -50,10 +57,7 @@ type SessionSearch = {
 export const Route = createFileRoute("/session")({
   component: SessionPage,
   validateSearch: (search: Record<string, unknown>): SessionSearch => ({
-    mode:
-      search.mode === QUIZ_MODE.FLASHCARDS
-        ? QUIZ_MODE.FLASHCARDS
-        : QUIZ_MODE.MULTIPLE_CHOICE,
+    mode: isQuizMode(search.mode) ? search.mode : QUIZ_MODE.MULTIPLE_CHOICE,
     direction:
       search.direction === DIRECTION.ENGLISH_TO_GREEK
         ? DIRECTION.ENGLISH_TO_GREEK
@@ -76,6 +80,11 @@ const FALLBACK_SELECTION: SelectionSpec = {
 }
 
 /** Search params arrive untrusted — anything unrecognised falls back safely. */
+/** Accepts any mode the app actually ships, so new games are not silently dropped. */
+function isQuizMode(value: unknown): value is QuizMode {
+  return (Object.values(QUIZ_MODE) as unknown[]).includes(value)
+}
+
 function parseSelection(raw: unknown): SelectionSpec {
   if (!raw || typeof raw !== "object") return FALLBACK_SELECTION
   const value = raw as Partial<SelectionSpec> & Record<string, unknown>
@@ -165,11 +174,47 @@ function SessionPage() {
   const [chosen, setChosen] = useState<string | null>(null)
   const [revealed, setRevealed] = useState(false)
   const [flipped, setFlipped] = useState(false)
+  const [picked, setPicked] = useState<number | null>(null)
   const [answers, setAnswers] = useState<AnswerRecord[]>([])
   const [finished, setFinished] = useState<SessionRecord | null>(null)
 
+  const words = built.current.words
+
+  // Memory Grid plays as one board rather than a run of questions.
+  const board = useMemo(
+    () =>
+      search.mode === QUIZ_MODE.MEMORY_GRID
+        ? buildMemoryBoard(words, makeRandom(search.seed), search.count)
+        : [],
+    [search.mode, search.seed, search.count, words]
+  )
+
+  const puzzle = useMemo(() => {
+    if (search.mode !== QUIZ_MODE.WORD_BUILDER) return null
+    // This runs before the empty-session guard below, so the index can
+    // momentarily point past the end.
+    const word = questions[index]?.word
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- index access is unsound without noUncheckedIndexedAccess
+    if (!word) return null
+    // Seeded per word so re-rendering never reshuffles the tray underneath.
+    return buildWordBuilderPuzzle(word, makeRandom(search.seed + index))
+  }, [questions, index, search.mode, search.seed])
+
   if (questions.length === 0) {
     return <EmptyState onBack={() => void navigate({ to: "/practice" })} />
+  }
+
+  if (
+    search.mode === QUIZ_MODE.MEMORY_GRID &&
+    words.length < MEMORY_GRID_MIN_PAIRS
+  ) {
+    return (
+      <EmptyState
+        onBack={() => void navigate({ to: "/practice" })}
+        title="Not enough words for a board"
+        detail={`Memory Grid needs at least ${MEMORY_GRID_MIN_PAIRS} words. Widen the selection and try again.`}
+      />
+    )
   }
 
   if (finished) {
@@ -194,6 +239,7 @@ function SessionPage() {
       setChosen(null)
       setRevealed(false)
       setFlipped(false)
+      setPicked(null)
       return
     }
     complete(nextAnswers)
@@ -226,7 +272,7 @@ function SessionPage() {
       direction: search.direction,
       startedAt: startedAt.current,
       endedAt: Date.now(),
-      wordIds: questions.map((q) => q.word.id),
+      wordIds: words.map((w) => w.id),
       answers: allAnswers,
       newlyMastered,
       sourceLabel,
@@ -234,6 +280,41 @@ function SessionPage() {
 
     saveSession(record, updated)
     setFinished(record)
+  }
+
+  /**
+   * Memory Grid scores per word rather than per question: a pair found with
+   * no wrong guesses along the way counts as known, while a word caught in a
+   * mismatch is recorded as missed.
+   */
+  function completeMemoryGrid(outcome: MemoryOutcome) {
+    const at = Date.now()
+    complete([
+      ...outcome.cleanWordIds.map((wordId) => ({
+        wordId,
+        correct: true,
+        answeredAt: at,
+      })),
+      ...outcome.missedWordIds.map((wordId) => ({
+        wordId,
+        correct: false,
+        answeredAt: at,
+      })),
+    ])
+  }
+
+  if (search.mode === QUIZ_MODE.MEMORY_GRID) {
+    return (
+      <div className="mx-auto max-w-3xl p-4 md:p-8">
+        <SessionHeader
+          sourceLabel={sourceLabel}
+          onExit={() => void navigate({ to: "/practice" })}
+        />
+        <div className="mt-8">
+          <MemoryGridGame board={board} onComplete={completeMemoryGrid} />
+        </div>
+      </div>
+    )
   }
 
   const progressValue = (index / questions.length) * 100
@@ -287,7 +368,9 @@ function SessionPage() {
               submitAnswer(chosen === question.answer, chosen ?? undefined)
             }
           />
-        ) : (
+        ) : null}
+
+        {search.mode === QUIZ_MODE.FLASHCARDS ? (
           <FlashcardCard
             key={question.word.id}
             question={question}
@@ -296,26 +379,125 @@ function SessionPage() {
             onFlip={() => setFlipped((value) => !value)}
             onRespond={(knewIt) => submitAnswer(knewIt)}
           />
-        )}
+        ) : null}
+
+        {search.mode === QUIZ_MODE.WORD_BUILDER && puzzle ? (
+          <WordBuilderCard
+            key={question.word.id}
+            puzzle={puzzle}
+            revealed={revealed}
+            onSubmit={(correct, attempt) => {
+              if (!data.settings.immediateFeedback) {
+                submitAnswer(correct, attempt)
+                return
+              }
+              setChosen(attempt)
+              setRevealed(true)
+            }}
+            onSkip={() => submitAnswer(false)}
+            onContinue={() =>
+              submitAnswer(chosen === question.word.greek, chosen ?? undefined)
+            }
+          />
+        ) : null}
+
+        {search.mode === QUIZ_MODE.LISTENING_QUEST ? (
+          <ListeningQuestCard
+            key={question.word.id}
+            question={question}
+            chosen={chosen}
+            revealed={revealed}
+            onChoose={setChosen}
+            onSubmit={() => {
+              if (!data.settings.immediateFeedback) {
+                submitAnswer(
+                  chosen === question.word.greek,
+                  chosen ?? undefined
+                )
+                return
+              }
+              setRevealed(true)
+            }}
+            onSkip={() => submitAnswer(false)}
+            onContinue={() =>
+              submitAnswer(chosen === question.word.greek, chosen ?? undefined)
+            }
+          />
+        ) : null}
+
+        {search.mode === QUIZ_MODE.PASSAGE_HUNT ? (
+          <PassageHuntCard
+            key={question.word.id}
+            word={question.word}
+            picked={picked}
+            revealed={revealed}
+            onPick={setPicked}
+            onSubmit={(correct) => {
+              if (!data.settings.immediateFeedback) {
+                submitAnswer(correct)
+                return
+              }
+              setChosen(correct ? question.word.greek : "")
+              setRevealed(true)
+            }}
+            onSkip={() => submitAnswer(false)}
+            onContinue={() => submitAnswer(chosen === question.word.greek)}
+          />
+        ) : null}
       </div>
     </div>
   )
 }
 
-function EmptyState({ onBack }: { onBack: () => void }) {
+function EmptyState({
+  onBack,
+  title = "Nothing to practise",
+  detail = "No words matched this selection. Try widening the status filter or choosing more sets.",
+}: {
+  onBack: () => void
+  title?: string
+  detail?: string
+}) {
   return (
     <div className="mx-auto max-w-md p-8 pt-20 text-center">
-      <h1 className="font-heading text-xl font-semibold">
-        Nothing to practise
-      </h1>
-      <p className="mt-2 text-sm text-muted-foreground">
-        No words matched this selection. Try widening the status filter or
-        choosing more sets.
-      </p>
+      <h1 className="font-heading text-xl font-semibold">{title}</h1>
+      <p className="mt-2 text-sm text-muted-foreground">{detail}</p>
       <Button className="mt-4" onClick={onBack}>
         Back to setup
       </Button>
     </div>
+  )
+}
+
+/** Shared chrome: where the words came from, and a way out. */
+function SessionHeader({
+  sourceLabel,
+  onExit,
+  children,
+}: {
+  sourceLabel: string
+  onExit: () => void
+  children?: React.ReactNode
+}) {
+  return (
+    <header className="flex items-center gap-4">
+      <div className="min-w-0 flex-1">
+        <div className="flex items-baseline justify-between gap-3">
+          <p className="truncate text-xs text-muted-foreground">
+            {sourceLabel}
+          </p>
+          {children}
+        </div>
+      </div>
+      <Button
+        variant="ghost"
+        size="icon-sm"
+        aria-label="Exit session"
+        onClick={onExit}
+      >
+        <HugeiconsIcon icon={Cancel01Icon} size={17} />
+      </Button>
+    </header>
   )
 }
 

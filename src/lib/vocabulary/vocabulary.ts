@@ -16,6 +16,7 @@ export const MAX_RANK = WORDS.reduce((max, w) => Math.max(max, w.rank), 0)
 
 const BY_ID = new Map(WORDS.map((word) => [word.id, word]))
 const BY_RANK = new Map(WORDS.map((word) => [word.rank, word]))
+const BY_GREEK = new Map(WORDS.map((word) => [word.greek, word]))
 
 export function getWord(id: string): Word | undefined {
   return BY_ID.get(id)
@@ -28,6 +29,11 @@ export function getWordByRank(rank: number): Word | undefined {
 /** Resolve a list of ids to words, dropping ids the current database no longer has. */
 export function getWords(ids: readonly string[]): Word[] {
   return ids.map((id) => BY_ID.get(id)).filter((w): w is Word => Boolean(w))
+}
+
+/** Looks a word up by its exact headword spelling. */
+export function getWordByGreek(greek: string): Word | undefined {
+  return BY_GREEK.get(greek)
 }
 
 export function getSet(setId: string): VocabularySet | undefined {

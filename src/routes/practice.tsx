@@ -4,8 +4,12 @@ import {
   ArrowLeft01Icon,
   ArrowRight01Icon,
   FlashIcon,
+  LanguageSkillIcon,
   Mortarboard02Icon,
+  Search01Icon,
+  ShuffleIcon,
   SparklesIcon,
+  Volume01Icon,
 } from "@hugeicons/core-free-icons"
 import { HugeiconsIcon } from "@hugeicons/react"
 import { Button } from "@/components/ui/button"
@@ -15,6 +19,8 @@ import { GreekText } from "@/components/vocabulary/word-bits"
 import {
   DIRECTION,
   MAX_QUESTION_COUNT,
+  MEMORY_GRID_MAX_PAIRS,
+  MEMORY_GRID_MIN_PAIRS,
   MIN_QUESTION_COUNT,
   QUESTION_ORDER,
   QUIZ_MODE,
@@ -380,6 +386,26 @@ function SelectStep({
   )
 }
 
+/** Display names for every mode, so the summary never drifts from the cards. */
+const FORMAT_LABEL: Record<QuizMode, string> = {
+  [QUIZ_MODE.MULTIPLE_CHOICE]: "Multiple choice",
+  [QUIZ_MODE.FLASHCARDS]: "Flashcards",
+  [QUIZ_MODE.WORD_BUILDER]: "Word builder",
+  [QUIZ_MODE.MEMORY_GRID]: "Memory grid",
+  [QUIZ_MODE.LISTENING_QUEST]: "Listening quest",
+  [QUIZ_MODE.PASSAGE_HUNT]: "Passage hunt",
+}
+
+/**
+ * Only the two translation drills read in both directions. The rest fix the
+ * direction by their nature: you always spell Greek, always hear Greek,
+ * always hunt Greek in a verse.
+ */
+const DIRECTIONAL_MODES: readonly QuizMode[] = [
+  QUIZ_MODE.MULTIPLE_CHOICE,
+  QUIZ_MODE.FLASHCARDS,
+]
+
 const FORMATS = [
   {
     mode: QUIZ_MODE.MULTIPLE_CHOICE,
@@ -395,6 +421,35 @@ const FORMATS = [
     description: "Reveal each meaning and judge your own recall.",
     image: "/images/flash_cards.png",
   },
+  {
+    mode: QUIZ_MODE.WORD_BUILDER,
+    icon: LanguageSkillIcon,
+    title: "Word builder",
+    description: "Spell the Greek word from letter tiles.",
+    image: "/images/study.png",
+  },
+  {
+    mode: QUIZ_MODE.MEMORY_GRID,
+    icon: ShuffleIcon,
+    title: "Memory grid",
+    description: "Turn over cards to match each Greek word to its meaning.",
+    image: "/images/study_2.png",
+  },
+  {
+    mode: QUIZ_MODE.LISTENING_QUEST,
+    icon: Volume01Icon,
+    title: "Listening quest",
+    description: "Hear a word and pick the spelling you heard.",
+    image: "/images/practice_2.png",
+  },
+  {
+    mode: QUIZ_MODE.PASSAGE_HUNT,
+    icon: Search01Icon,
+    title: "Passage hunt",
+    description: "Find the word inside a real verse, inflected as it appears.",
+    image: "/images/open_book.png",
+    note: "Only covers words that ship with a verse.",
+  },
 ] as const
 
 function FormatStep({
@@ -405,7 +460,7 @@ function FormatStep({
   onModeChange: (mode: QuizMode) => void
 }) {
   return (
-    <div className="grid gap-3 sm:grid-cols-2">
+    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
       {FORMATS.map((format) => (
         <button
           key={format.mode}
@@ -436,6 +491,11 @@ function FormatStep({
           <p className="mt-1 text-sm text-muted-foreground">
             {format.description}
           </p>
+          {"note" in format ? (
+            <p className="mt-1.5 text-xs text-muted-foreground/80">
+              {format.note}
+            </p>
+          ) : null}
         </button>
       ))}
     </div>
@@ -464,19 +524,21 @@ function ConfigureStep({
   return (
     <div className="grid gap-4 lg:grid-cols-[1fr_320px]">
       <div className="flex flex-col gap-4">
-        <Card>
-          <h2 className="text-sm font-medium">Direction</h2>
-          <SegmentedControl
-            className="mt-3"
-            label="Question direction"
-            value={direction}
-            onValueChange={(value) => onDirectionChange(value as Direction)}
-            options={[
-              { value: DIRECTION.GREEK_TO_ENGLISH, label: "Greek → English" },
-              { value: DIRECTION.ENGLISH_TO_GREEK, label: "English → Greek" },
-            ]}
-          />
-        </Card>
+        {DIRECTIONAL_MODES.includes(mode) ? (
+          <Card>
+            <h2 className="text-sm font-medium">Direction</h2>
+            <SegmentedControl
+              className="mt-3"
+              label="Question direction"
+              value={direction}
+              onValueChange={(value) => onDirectionChange(value as Direction)}
+              options={[
+                { value: DIRECTION.GREEK_TO_ENGLISH, label: "Greek → English" },
+                { value: DIRECTION.ENGLISH_TO_GREEK, label: "English → Greek" },
+              ]}
+            />
+          </Card>
+        ) : null}
 
         <Card>
           <h2 className="text-sm font-medium">Question order</h2>
@@ -502,11 +564,23 @@ function ConfigureStep({
 
         <Card>
           <NumberField
-            label="Number of questions"
+            label={
+              mode === QUIZ_MODE.MEMORY_GRID
+                ? "Pairs on the board"
+                : "Number of questions"
+            }
             value={count}
-            min={MIN_QUESTION_COUNT}
-            max={MAX_QUESTION_COUNT}
-            step={5}
+            min={
+              mode === QUIZ_MODE.MEMORY_GRID
+                ? MEMORY_GRID_MIN_PAIRS
+                : MIN_QUESTION_COUNT
+            }
+            max={
+              mode === QUIZ_MODE.MEMORY_GRID
+                ? MEMORY_GRID_MAX_PAIRS
+                : MAX_QUESTION_COUNT
+            }
+            step={mode === QUIZ_MODE.MEMORY_GRID ? 1 : 5}
             onChange={onCountChange}
           />
         </Card>
@@ -517,16 +591,14 @@ function ConfigureStep({
           Practice summary
         </h2>
         <dl className="mt-3 flex flex-col gap-2 text-sm">
-          <SummaryRow label="Format">
-            {mode === QUIZ_MODE.MULTIPLE_CHOICE
-              ? "Multiple choice"
-              : "Flashcards"}
-          </SummaryRow>
-          <SummaryRow label="Direction">
-            {direction === DIRECTION.GREEK_TO_ENGLISH
-              ? "Greek → English"
-              : "English → Greek"}
-          </SummaryRow>
+          <SummaryRow label="Format">{FORMAT_LABEL[mode]}</SummaryRow>
+          {DIRECTIONAL_MODES.includes(mode) ? (
+            <SummaryRow label="Direction">
+              {direction === DIRECTION.GREEK_TO_ENGLISH
+                ? "Greek → English"
+                : "English → Greek"}
+            </SummaryRow>
+          ) : null}
           <SummaryRow label="Words available">{preview.poolSize}</SummaryRow>
           <SummaryRow label="Questions">{preview.questions.length}</SummaryRow>
         </dl>
